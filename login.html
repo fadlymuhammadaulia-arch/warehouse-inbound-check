@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Checker login</title>
+  <style>
+    body { font-family: sans-serif; padding: 30px; max-width: 500px; margin: auto; }
+    button { display: block; width: 100%; padding: 14px; margin: 6px 0; font-size: 18px;
+              border-radius: 6px; border: 1px solid #999; background: #eee; cursor: pointer; }
+    button:disabled { background: #ddd; color: #888; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h2>Select checker</h2>
+  <div id="checkerList">Loading...</div>
+  <p><a href="index.html">Back</a></p>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    const checkersRef = db.ref('checkers');
+
+    // Seed 10 checker slots on first-ever load if they don't exist yet.
+    checkersRef.once('value').then(snap => {
+      if (!snap.exists()) {
+        const seed = {};
+        for (let i = 1; i <= 10; i++) seed[i] = false;
+        checkersRef.set(seed);
+      }
+    });
+
+    checkersRef.on('value', snap => {
+      const data = snap.val() || {};
+      const container = document.getElementById('checkerList');
+      container.innerHTML = "";
+      for (let i = 1; i <= 10; i++) {
+        const locked = data[i] === true;
+        const btn = document.createElement('button');
+        btn.textContent = locked ? ("Checker " + i + " (in use)") : ("Checker " + i);
+        btn.disabled = locked;
+        btn.onclick = () => selectChecker(i);
+        container.appendChild(btn);
+      }
+    });
+
+    function selectChecker(id) {
+      const ref = db.ref('checkers/' + id);
+      ref.transaction(current => {
+        if (current === true) return; // already locked, abort
+        return true;
+      }).then(result => {
+        if (result.committed) {
+          window.location.href = "scan.html?checker=" + id;
+        } else {
+          alert("That checker was just taken by someone else - pick another.");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
