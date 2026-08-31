@@ -20,11 +20,11 @@
   <h2>Upload Master Data</h2>
   <p><a href="admin.html">Back to Dashboard</a></p>
 
-  <p>Upload one CSV or Excel (.xlsx) file. Only the first sheet is read.
-  Format: first column SKU, second column item Name, remaining columns are
-  store names with the qty target as the cell value (blank if that SKU
-  doesn't go to that store). A SKU can have qty under more than one
-  store.</p>
+  <p>Upload satu file CSV atau Excel (.xlsx). Hanya sheet pertama yang
+  akan dibaca. Format: kolom pertama SKU, kolom kedua Nama item, kolom
+  berikutnya adalah nama store dengan qty target sebagai nilai sel
+  (kosongkan jika SKU tersebut tidak dikirim ke store tersebut). Satu
+  SKU dapat memiliki qty di lebih dari satu store.</p>
 
   <input type="file" id="fileInput" accept=".csv,.xlsx"/>
   <br/>
@@ -32,17 +32,19 @@
   <p id="msg"></p>
 
   <hr/>
-  <h3>Reset linked document</h3>
-  <p>This deletes the uploaded master data and all scan/handling unit
-  results, so you can start over with a fresh file.</p>
+  <h3>Reset dokumen tertaut</h3>
+  <p>Tindakan ini akan menghapus data master yang telah diupload beserta
+  seluruh hasil scan dan handling unit, sehingga anda dapat memulai
+  kembali dengan file yang baru.</p>
   <button onclick="showResetModal()" style="background:#c0392b;color:white;">Reset Document</button>
 
   <div id="modalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
-      <h3>Are you sure?</h3>
-      <p>This will permanently delete the uploaded master data, all scans,
-      and all handling units. This cannot be undone.</p>
-      <label><input type="checkbox" id="confirmCheck"/> I understand, delete everything</label>
+      <h3>Apakah anda yakin?</h3>
+      <p>Tindakan ini akan menghapus secara permanen data master yang
+      telah diupload, seluruh scan, dan seluruh handling unit. Tindakan
+      ini tidak dapat dibatalkan.</p>
+      <label><input type="checkbox" id="confirmCheck"/> Saya mengerti, hapus semua data</label>
       <button id="confirmYes" onclick="doReset()" disabled>Yes, Reset</button>
       <button onclick="hideResetModal()">Cancel</button>
     </div>
@@ -50,14 +52,27 @@
 
   <div id="diffFileModalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
-      <h3>Different file detected</h3>
+      <h3>File berbeda terdeteksi</h3>
       <p id="diffFileMsg"></p>
-      <p>Uploading this file will reset all scan data and handling units,
-      since it doesn't match the last uploaded file. Master data will be
-      replaced either way, but this also clears progress.</p>
-      <label><input type="checkbox" id="diffFileCheck"/> I understand, reset and upload this new file</label>
+      <p>Mengupload file ini akan mereset seluruh data scan dan handling
+      unit, karena nama file tidak sama dengan file yang terakhir
+      diupload. Data master akan tetap diganti pada kedua kondisi,
+      namun tindakan ini juga menghapus progress yang sudah berjalan.</p>
+      <label><input type="checkbox" id="diffFileCheck"/> Saya mengerti, reset dan upload file baru ini</label>
       <button id="diffFileOk" onclick="confirmDifferentFileUpload()" disabled>OK</button>
       <button onclick="cancelDifferentFileUpload()">Cancel</button>
+    </div>
+  </div>
+
+  <div id="priorityModalBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h3>Tentukan Prioritas Store</h3>
+      <p>Urutan di bawah ini akan menjadi prioritas pengisian qty untuk
+      setiap SKU (store paling atas diisi lebih dulu). Gunakan tombol
+      panah untuk mengubah urutan jika diperlukan, lalu klik OK untuk
+      melanjutkan.</p>
+      <ol id="priorityList" style="padding-left: 20px;"></ol>
+      <button onclick="confirmPriorityOrder()">OK</button>
     </div>
   </div>
 
@@ -122,15 +137,19 @@
     function cancelDifferentFileUpload() {
       document.getElementById('diffFileModalBackdrop').style.display = 'none';
       pendingFile = null;
-      document.getElementById('msg').textContent = "Upload cancelled - existing data unchanged.";
+      document.getElementById('msg').textContent = "Upload dibatalkan - data yang ada tidak berubah.";
     }
+
+    let pendingMasterData = null;
+    let pendingStoreOrder = null;
+    let pendingMetaFileName = null;
 
     async function performUpload(file) {
       const msg = document.getElementById('msg');
-      msg.textContent = "Uploading...";
+      msg.textContent = "Sedang mengupload...";
 
       const rows = await readFileAsRows(file);
-      if (rows.length < 2) { msg.textContent = "File looks empty."; return; }
+      if (rows.length < 2) { msg.textContent = "File terlihat kosong."; return; }
 
       const header = rows[0];
       // Column 0 = SKU, column 1 = Name, columns 2+ = store names.
@@ -152,14 +171,48 @@
         masterData[sku] = { name: name, stores: stores };
       }
 
+      pendingMasterData = masterData;
+      pendingStoreOrder = storeNames.slice();
+      pendingMetaFileName = file.name;
+
+      renderPriorityList();
+      document.getElementById('priorityModalBackdrop').style.display = 'flex';
+    }
+
+    function renderPriorityList() {
+      const list = document.getElementById('priorityList');
+      list.innerHTML = pendingStoreOrder.map((s, i) => {
+        const upDisabled = i === 0 ? 'disabled' : '';
+        const downDisabled = i === pendingStoreOrder.length - 1 ? 'disabled' : '';
+        return "<li style='margin:10px 0;'>" + s +
+               " <button " + upDisabled + " onclick='moveStorePriority(" + i + ",-1)'>&uarr;</button>" +
+               " <button " + downDisabled + " onclick='moveStorePriority(" + i + ",1)'>&darr;</button></li>";
+      }).join("");
+    }
+
+    function moveStorePriority(index, direction) {
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= pendingStoreOrder.length) return;
+      const tmp = pendingStoreOrder[index];
+      pendingStoreOrder[index] = pendingStoreOrder[newIndex];
+      pendingStoreOrder[newIndex] = tmp;
+      renderPriorityList();
+    }
+
+    async function confirmPriorityOrder() {
+      const msg = document.getElementById('msg');
       try {
-        await db.ref('master').set(masterData);
-        await db.ref('storeOrder').set(storeNames);
-        await db.ref('meta/lastFileName').set(file.name);
-        msg.textContent = "Uploaded successfully - " + Object.keys(masterData).length + " SKUs across " + storeNames.length + " stores (fill order: " + storeNames.join(" -> ") + ").";
+        await db.ref('master').set(pendingMasterData);
+        await db.ref('storeOrder').set(pendingStoreOrder);
+        await db.ref('meta/lastFileName').set(pendingMetaFileName);
+        document.getElementById('priorityModalBackdrop').style.display = 'none';
+        msg.textContent = "Berhasil diupload - " + Object.keys(pendingMasterData).length + " SKU pada " + pendingStoreOrder.length + " store (urutan pengisian: " + pendingStoreOrder.join(" -> ") + ").";
       } catch (e) {
-        msg.textContent = "Upload failed: " + e.message;
+        msg.textContent = "Upload gagal: " + e.message;
       }
+      pendingMasterData = null;
+      pendingStoreOrder = null;
+      pendingMetaFileName = null;
     }
 
     function showResetModal() {
@@ -185,7 +238,7 @@
         meta: null
       });
       hideResetModal();
-      document.getElementById('msg').textContent = "All data has been reset. You can upload a new file now.";
+      document.getElementById('msg').textContent = "Semua data telah direset. Anda dapat mengupload file baru sekarang.";
     }
   </script>
 </body>

@@ -24,7 +24,7 @@
   <p><a href="admin.html">Back to Dashboard</a></p>
   <table>
     <tr><th>HU Code</th><th>Checker</th><th>Store</th><th>Status</th><th>Action</th></tr>
-    <tbody id="rows"><tr><td colspan="5">Loading...</td></tr></tbody>
+    <tbody id="rows"><tr><td colspan="5">Memuat...</td></tr></tbody>
   </table>
 
   <div id="printArea" style="display:none;"></div>
@@ -46,17 +46,18 @@
       const entries = Object.entries(hus).sort((a, b) => (b[1].createdAt || "").localeCompare(a[1].createdAt || ""));
 
       if (entries.length === 0) {
-        rowsEl.innerHTML = "<tr><td colspan='5'>No handling units yet.</td></tr>";
+        rowsEl.innerHTML = "<tr><td colspan='5'>Belum ada handling unit.</td></tr>";
         return;
       }
 
       rowsEl.innerHTML = entries.map(([id, hu]) => {
         const statusClass = hu.status === 'closed' ? 'status-closed' : 'status-open';
+        const statusLabel = hu.status === 'closed' ? 'Tertutup' : 'Terbuka';
         const action = hu.status === 'closed'
           ? "<button onclick=\"printLabel('" + id + "')\">Print Label</button>"
           : "-";
         return "<tr><td>" + hu.huCode + "</td><td>" + hu.checkerId + "</td><td>" + hu.store +
-               "</td><td class='" + statusClass + "'>" + hu.status + "</td><td>" + action + "</td></tr>";
+               "</td><td class='" + statusClass + "'>" + statusLabel + "</td><td>" + action + "</td></tr>";
       }).join("");
     }
 

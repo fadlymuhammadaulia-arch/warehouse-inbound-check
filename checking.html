@@ -30,7 +30,7 @@
   </div>
 
   <input id="skuInput" autofocus placeholder="Scan SKU..."/>
-  <div id="preview">Scan a SKU to begin.</div>
+  <div id="preview">Scan SKU untuk memulai.</div>
   <button class="big" id="submitBtn" onclick="handleSubmit()" disabled>Submit</button>
   <p id="msg"></p>
 
@@ -42,7 +42,7 @@
   <div id="huModalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="huModalTitle">Scan Handling Unit</h3>
-      <p id="huModalMsg">No open handling unit for this store yet - scan or enter the HU code.</p>
+      <p id="huModalMsg">Belum ada handling unit terbuka untuk store ini - scan atau masukkan kode HU.</p>
       <input id="huInput" placeholder="Scan HU code..."/>
       <p id="huError" style="color:red; min-height: 20px;"></p>
       <button class="big" onclick="submitHU()">Submit HU</button>
@@ -106,14 +106,14 @@
         const preview = document.getElementById('preview');
         const submitBtn = document.getElementById('submitBtn');
         if (!sku) {
-          preview.textContent = "Scan a SKU to begin.";
+          preview.textContent = "Scan SKU untuk memulai.";
           submitBtn.disabled = true;
           return;
         }
         const masterSnap = await db.ref('master/' + sku).once('value');
         const entry = masterSnap.val();
         if (entry) {
-          preview.innerHTML = "<b>" + sku + "</b> - " + (entry.name || "(no name)");
+          preview.innerHTML = "<b>" + sku + "</b> - " + (entry.name || "(tanpa nama)");
           submitBtn.disabled = false;
         } else {
           preview.innerHTML = "<span style='color:red'>SKU ini tidak ada di Database, check dan scan ulang</span>";
@@ -234,7 +234,7 @@
       msg.textContent = (overflow ? "OVERFLOW - " : "") + sku + " -> HU " + huCode + " / " + store + " (" + filled + "/" + target + ")";
 
       document.getElementById('skuInput').value = '';
-      document.getElementById('preview').textContent = "Scan a SKU to begin.";
+      document.getElementById('preview').textContent = "Scan SKU untuk memulai.";
       document.getElementById('submitBtn').disabled = true;
       document.getElementById('skuInput').focus();
       loadRecent();
@@ -259,7 +259,7 @@
       const snap = await db.ref('openHU/' + checkerId).once('value');
       const openMap = snap.val() || {};
       const stores = Object.keys(openMap);
-      if (stores.length === 0) { alert("No open handling unit to close."); return; }
+      if (stores.length === 0) { alert("Tidak ada handling unit yang terbuka untuk ditutup."); return; }
 
       if (stores.length === 1) {
         pendingCloseStore = stores[0];

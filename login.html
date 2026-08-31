@@ -12,8 +12,8 @@
   </style>
 </head>
 <body>
-  <h2>Select checker</h2>
-  <div id="checkerList">Loading...</div>
+  <h2>Pilih Checker</h2>
+  <div id="checkerList">Memuat...</div>
   <p><a href="index.html">Back</a></p>
 
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -73,7 +73,7 @@
           db.ref('checkers/' + id + '/lastActiveAt').set(Date.now());
           window.location.href = "checking.html?checker=" + id;
         } else {
-          alert("That checker was just taken by someone else - pick another.");
+          alert("Checker tersebut baru saja diambil oleh orang lain - silahkan pilih yang lain.");
         }
       });
     }
