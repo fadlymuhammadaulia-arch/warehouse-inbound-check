@@ -58,6 +58,17 @@
     </div>
   </div>
 
+  <div id="closeHuScanModalBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h3>Scan HU yang akan ditutup</h3>
+      <p>Anda memiliki beberapa HU terbuka. Scan atau ketik kode HU yang ingin ditutup.</p>
+      <input id="closeHuScanInput" placeholder="Scan HU code..."/>
+      <p id="closeHuScanError" style="color:red; min-height: 20px;"></p>
+      <button class="big" onclick="submitCloseHuScan()">Cari HU</button>
+      <button class="big" onclick="document.getElementById('closeHuScanModalBackdrop').style.display='none'">Batal</button>
+    </div>
+  </div>
+
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
@@ -159,7 +170,8 @@
 
       // Check for an open HU for this checker + store.
       const openSnap = await db.ref('openHU/' + checkerId + '/' + targetStore).once('value');
-      const openHuId = openSnap.val();
+      const openEntry = openSnap.val();
+      const openHuId = openEntry ? openEntry.huId : null;
 
       if (!openHuId) {
         pendingSku = sku; pendingStore = targetStore; pendingQtyTarget = target;
@@ -197,7 +209,7 @@
         huCode: huCode, store: pendingStore, checkerId: checkerId,
         status: 'open', createdAt: new Date().toISOString()
       });
-      await db.ref('openHU/' + checkerId + '/' + pendingStore).set(pushRef.key);
+      await db.ref('openHU/' + checkerId + '/' + pendingStore).set({ huId: pushRef.key, huCode: huCode });
       document.getElementById('huModalBackdrop').style.display = 'none';
       await finishScan(pendingSku, pendingStore, pushRef.key, pendingQtyTarget, false);
     }
@@ -241,6 +253,7 @@
 
     let pendingCloseStore = null;
     let pendingCloseHuId = null;
+    let openHuMapCache = {};
 
     async function closeCurrentHU() {
       const snap = await db.ref('openHU/' + checkerId).once('value');
@@ -248,15 +261,37 @@
       const stores = Object.keys(openMap);
       if (stores.length === 0) { alert("No open handling unit to close."); return; }
 
-      let storeToClose = stores[0];
-      if (stores.length > 1) {
-        const choice = prompt("Multiple open HUs: " + stores.join(", ") + "\nType the store to close:");
-        if (!choice || !openMap[choice]) return;
-        storeToClose = choice;
+      if (stores.length === 1) {
+        pendingCloseStore = stores[0];
+        pendingCloseHuId = openMap[stores[0]].huId;
+        document.getElementById('closeHuModalBackdrop').style.display = 'flex';
+        return;
       }
 
-      pendingCloseStore = storeToClose;
-      pendingCloseHuId = openMap[storeToClose];
+      // Multiple open HUs - ask the checker to scan the HU code instead
+      // of picking a store name.
+      openHuMapCache = openMap;
+      document.getElementById('closeHuScanInput').value = '';
+      document.getElementById('closeHuScanError').textContent = '';
+      document.getElementById('closeHuScanModalBackdrop').style.display = 'flex';
+      document.getElementById('closeHuScanInput').focus();
+    }
+
+    function submitCloseHuScan() {
+      const scanned = document.getElementById('closeHuScanInput').value.trim();
+      const errorEl = document.getElementById('closeHuScanError');
+      if (!scanned) return;
+
+      const match = Object.entries(openHuMapCache).find(([store, entry]) => entry.huCode === scanned);
+      if (!match) {
+        errorEl.textContent = "HU tidak ditemukan di antara HU yang sedang terbuka.";
+        return;
+      }
+
+      const [store, entry] = match;
+      pendingCloseStore = store;
+      pendingCloseHuId = entry.huId;
+      document.getElementById('closeHuScanModalBackdrop').style.display = 'none';
       document.getElementById('closeHuModalBackdrop').style.display = 'flex';
     }
 
