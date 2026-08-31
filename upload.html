@@ -48,6 +48,19 @@
     </div>
   </div>
 
+  <div id="diffFileModalBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h3>Different file detected</h3>
+      <p id="diffFileMsg"></p>
+      <p>Uploading this file will reset all scan data and handling units,
+      since it doesn't match the last uploaded file. Master data will be
+      replaced either way, but this also clears progress.</p>
+      <label><input type="checkbox" id="diffFileCheck"/> I understand, reset and upload this new file</label>
+      <button id="diffFileOk" onclick="confirmDifferentFileUpload()" disabled>OK</button>
+      <button onclick="cancelDifferentFileUpload()">Cancel</button>
+    </div>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
@@ -66,10 +79,54 @@
       }
     }
 
+    let pendingFile = null;
+
     async function upload() {
       const file = document.getElementById('fileInput').files[0];
       const msg = document.getElementById('msg');
       if (!file) return;
+
+      const metaSnap = await db.ref('meta/lastFileName').once('value');
+      const lastFileName = metaSnap.val();
+
+      if (lastFileName && lastFileName !== file.name) {
+        pendingFile = file;
+        document.getElementById('diffFileMsg').innerHTML =
+          "Previous file: <b>" + lastFileName + "</b><br/>New file: <b>" + file.name + "</b>";
+        document.getElementById('diffFileCheck').checked = false;
+        document.getElementById('diffFileOk').disabled = true;
+        document.getElementById('diffFileModalBackdrop').style.display = 'flex';
+        return;
+      }
+
+      await performUpload(file);
+    }
+
+    document.getElementById('diffFileCheck').addEventListener('change', (e) => {
+      document.getElementById('diffFileOk').disabled = !e.target.checked;
+    });
+
+    async function confirmDifferentFileUpload() {
+      document.getElementById('diffFileModalBackdrop').style.display = 'none';
+      await db.ref().update({
+        scans: null,
+        handlingUnits: null,
+        openHU: null,
+        recent: null
+      });
+      const file = pendingFile;
+      pendingFile = null;
+      await performUpload(file);
+    }
+
+    function cancelDifferentFileUpload() {
+      document.getElementById('diffFileModalBackdrop').style.display = 'none';
+      pendingFile = null;
+      document.getElementById('msg').textContent = "Upload cancelled - existing data unchanged.";
+    }
+
+    async function performUpload(file) {
+      const msg = document.getElementById('msg');
       msg.textContent = "Uploading...";
 
       const rows = await readFileAsRows(file);
@@ -98,6 +155,7 @@
       try {
         await db.ref('master').set(masterData);
         await db.ref('storeOrder').set(storeNames);
+        await db.ref('meta/lastFileName').set(file.name);
         msg.textContent = "Uploaded successfully - " + Object.keys(masterData).length + " SKUs across " + storeNames.length + " stores (fill order: " + storeNames.join(" -> ") + ").";
       } catch (e) {
         msg.textContent = "Upload failed: " + e.message;
@@ -123,7 +181,8 @@
         scans: null,
         handlingUnits: null,
         openHU: null,
-        recent: null
+        recent: null,
+        meta: null
       });
       hideResetModal();
       document.getElementById('msg').textContent = "All data has been reset. You can upload a new file now.";

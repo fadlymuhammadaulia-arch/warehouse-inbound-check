@@ -42,8 +42,9 @@
   <div id="huModalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="huModalTitle">Scan Handling Unit</h3>
-      <p>No open handling unit for this store yet - scan or enter the HU code.</p>
+      <p id="huModalMsg">No open handling unit for this store yet - scan or enter the HU code.</p>
       <input id="huInput" placeholder="Scan HU code..."/>
+      <p id="huError" style="color:red; min-height: 20px;"></p>
       <button class="big" onclick="submitHU()">Submit HU</button>
     </div>
   </div>
@@ -163,6 +164,10 @@
       if (!openHuId) {
         pendingSku = sku; pendingStore = targetStore; pendingQtyTarget = target;
         document.getElementById('huInput').value = '';
+        document.getElementById('huError').textContent = '';
+        document.getElementById('huModalMsg').innerHTML =
+          "SKU <b>" + sku + "</b> akan ditempatkan untuk store <b>" + targetStore +
+          "</b>, karena belum ada HU tertaut silahkan scan HU baru.";
         document.getElementById('huModalBackdrop').style.display = 'flex';
         document.getElementById('huInput').focus();
         return;
@@ -174,6 +179,19 @@
     async function submitHU() {
       const huCode = document.getElementById('huInput').value.trim();
       if (!huCode) return;
+      const errorEl = document.getElementById('huError');
+      errorEl.textContent = '';
+
+      // Reject if this HU code already exists in the current batch,
+      // regardless of which store/checker/status it belongs to.
+      const allHuSnap = await db.ref('handlingUnits').once('value');
+      const allHu = allHuSnap.val() || {};
+      const isDuplicate = Object.values(allHu).some(hu => hu.huCode === huCode);
+      if (isDuplicate) {
+        errorEl.textContent = "HU telah digunakan, silahkan scan HU lain";
+        return;
+      }
+
       const pushRef = db.ref('handlingUnits').push();
       await pushRef.set({
         huCode: huCode, store: pendingStore, checkerId: checkerId,
