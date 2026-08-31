@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Admin Dashboard</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .nav button { padding: 10px 14px; font-size: 15px; cursor: pointer; }
+    input#search { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; margin-bottom: 15px; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { border: 1px solid #999; padding: 6px 10px; text-align: left; font-size: 14px; }
+    th { background: #2f5496; color: white; }
+    .full { color: green; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Admin Dashboard</h2>
+  <div class="nav">
+    <button onclick="downloadSummary()">Download Summary</button>
+    <button onclick="downloadDetail()">Download Detail</button>
+    <button onclick="location.href='handling-units.html'">Handling Units</button>
+    <button onclick="location.href='upload.html'">Upload File</button>
+    <button onclick="location.href='index.html'">Back to Main</button>
+  </div>
+
+  <input id="search" placeholder="Search SKU or item name..."/>
+  <table>
+    <thead><tr id="headerRow"><th>SKU</th><th>Name</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="2">Loading...</td></tr></tbody>
+  </table>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    let master = {};
+    let storeOrder = [];
+    let scanCounts = {}; // key: sku|store -> count
+
+    async function loadAll() {
+      const [masterSnap, orderSnap, scansSnap] = await Promise.all([
+        db.ref('master').once('value'),
+        db.ref('storeOrder').once('value'),
+        db.ref('scans').once('value')
+      ]);
+      master = masterSnap.val() || {};
+      storeOrder = orderSnap.val() || [];
+      const scansData = scansSnap.val() || {};
+
+      scanCounts = {};
+      Object.entries(scansData).forEach(([store, skus]) => {
+        Object.entries(skus || {}).forEach(([sku, entries]) => {
+          scanCounts[sku + '|' + store] = Object.keys(entries || {}).length;
+        });
+      });
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const headerRow = document.getElementById('headerRow');
+      headerRow.innerHTML = "<th>SKU</th><th>Name</th>" + storeOrder.map(s => "<th>" + s + "</th>").join("");
+
+      const filterText = document.getElementById('search').value.trim().toLowerCase();
+      const rowsEl = document.getElementById('rows');
+      const skus = Object.keys(master).filter(sku => {
+        if (!filterText) return true;
+        const name = (master[sku].name || "").toLowerCase();
+        return sku.toLowerCase().includes(filterText) || name.includes(filterText);
+      }).sort();
+
+      if (skus.length === 0) {
+        rowsEl.innerHTML = "<tr><td colspan='" + (2 + storeOrder.length) + "'>No data - upload master data first.</td></tr>";
+        return;
+      }
+
+      rowsEl.innerHTML = skus.map(sku => {
+        const entry = master[sku];
+        const cells = storeOrder.map(store => {
+          const target = (entry.stores || {})[store];
+          if (target === undefined) return "<td>-</td>";
+          const filled = scanCounts[sku + '|' + store] || 0;
+          const cls = filled >= target ? 'full' : '';
+          return "<td class='" + cls + "'>" + filled + "/" + target + "</td>";
+        }).join("");
+        return "<tr><td>" + sku + "</td><td>" + (entry.name || "") + "</td>" + cells + "</tr>";
+      }).join("");
+    }
+
+    document.getElementById('search').addEventListener('input', renderTable);
+
+    function csvEscape(v) {
+      return '"' + String(v).replace(/"/g, '""') + '"';
+    }
+    function triggerDownload(filename, csv) {
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadSummary() {
+      const rows = [["SKU", "Name", ...storeOrder]];
+      Object.keys(master).sort().forEach(sku => {
+        const entry = master[sku];
+        const line = [sku, entry.name || ""];
+        storeOrder.forEach(store => {
+          line.push(scanCounts[sku + '|' + store] || 0);
+        });
+        rows.push(line);
+      });
+      const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n");
+      triggerDownload("summary-" + new Date().toISOString().slice(0, 10) + ".csv", csv);
+    }
+
+    async function downloadDetail() {
+      const scansSnap = await db.ref('scans').once('value');
+      const scansData = scansSnap.val() || {};
+      const rows = [["SKU", "Name", "Qty", "HandlingUnit", "Store", "CheckerId", "Timestamp"]];
+      Object.entries(scansData).forEach(([store, skus]) => {
+        Object.entries(skus || {}).forEach(([sku, entries]) => {
+          Object.values(entries || {}).forEach(scan => {
+            rows.push([sku, (master[sku] || {}).name || "", 1, scan.huCode || "", store, scan.checkerId, scan.timestamp]);
+          });
+        });
+      });
+      const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n");
+      triggerDownload("detail-" + new Date().toISOString().slice(0, 10) + ".csv", csv);
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>

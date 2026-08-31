@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Checking</title>
+  <style>
+    body { font-family: sans-serif; padding: 15px; max-width: 420px; margin: auto; }
+    input#skuInput { font-size: 22px; width: 100%; padding: 10px; box-sizing: border-box; }
+    button.big { font-size: 20px; padding: 12px; width: 100%; margin-top: 8px; cursor: pointer; }
+    #preview { font-size: 18px; min-height: 50px; margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 6px; }
+    #msg { font-size: 16px; min-height: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+    td, th { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+    .modal-backdrop { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6);
+                       display: flex; align-items: center; justify-content: center; }
+    .modal { background: white; padding: 20px; border-radius: 8px; width: 85%; max-width: 380px; }
+    .modal input { font-size: 20px; width: 100%; padding: 8px; box-sizing: border-box; margin: 10px 0; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; }
+    .topbar button { font-size: 13px; padding: 6px 10px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h3 id="title">Checker</h3>
+    <div>
+      <button onclick="closeCurrentHU()">Close HU</button>
+      <button onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <input id="skuInput" autofocus placeholder="Scan SKU..."/>
+  <div id="preview">Scan a SKU to begin.</div>
+  <button class="big" id="submitBtn" onclick="handleSubmit()" disabled>Submit</button>
+  <p id="msg"></p>
+
+  <table>
+    <tr><th>SKU</th><th>Name</th><th>HU</th><th>Store</th></tr>
+    <tbody id="recentRows"></tbody>
+  </table>
+
+  <div id="huModalBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h3 id="huModalTitle">Scan Handling Unit</h3>
+      <p>No open handling unit for this store yet - scan or enter the HU code.</p>
+      <input id="huInput" placeholder="Scan HU code..."/>
+      <button class="big" onclick="submitHU()">Submit HU</button>
+    </div>
+  </div>
+
+  <div id="closeHuModalBackdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h3>Tutup Handling Unit?</h3>
+      <p>Apakah akan tutup HU? Jika iya maka print HU dapat dilakukan pada admin view PC.</p>
+      <button class="big" onclick="confirmCloseHU()">Iya</button>
+      <button class="big" onclick="cancelCloseHU()">Batal</button>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const checkerId = params.get('checker');
+    let storeOrder = [];
+    let pendingSku = null;
+    let pendingStore = null;
+    let pendingQtyTarget = null;
+
+    if (!checkerId) {
+      document.body.innerHTML = "<p>No checker selected. <a href='login.html'>Go to login</a></p>";
+    } else {
+      init();
+    }
+
+    async function init() {
+      document.getElementById('title').textContent = "Checker " + checkerId;
+
+      // Release the lock automatically if this tab/connection drops
+      // (closing the browser, losing network, etc.) - this is the
+      // "close browser tab releases the account" requirement.
+      db.ref('checkers/' + checkerId + '/locked').onDisconnect().set(false);
+
+      const orderSnap = await db.ref('storeOrder').once('value');
+      storeOrder = orderSnap.val() || [];
+
+      const input = document.getElementById('skuInput');
+      input.focus();
+      loadRecent();
+
+      input.addEventListener('input', async () => {
+        const sku = input.value.trim();
+        const preview = document.getElementById('preview');
+        const submitBtn = document.getElementById('submitBtn');
+        if (!sku) {
+          preview.textContent = "Scan a SKU to begin.";
+          submitBtn.disabled = true;
+          return;
+        }
+        const masterSnap = await db.ref('master/' + sku).once('value');
+        const entry = masterSnap.val();
+        if (entry) {
+          preview.innerHTML = "<b>" + sku + "</b> - " + (entry.name || "(no name)");
+          submitBtn.disabled = false;
+        } else {
+          preview.innerHTML = "<span style='color:red'>SKU ini tidak ada di Database, check dan scan ulang</span>";
+          submitBtn.disabled = true;
+        }
+      });
+
+      // Only submit on the button click, never automatically on scan/enter.
+      input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') e.preventDefault();
+      });
+    }
+
+    async function handleSubmit() {
+      const input = document.getElementById('skuInput');
+      const sku = input.value.trim();
+      if (!sku) return;
+      db.ref('checkers/' + checkerId + '/lastActiveAt').set(Date.now());
+
+      const masterSnap = await db.ref('master/' + sku).once('value');
+      const entry = masterSnap.val();
+      const msg = document.getElementById('msg');
+      if (!entry) {
+        msg.style.color = 'red';
+        msg.textContent = "SKU ini tidak ada di Database, check dan scan ulang";
+        return;
+      }
+
+      const assignedStores = storeOrder.filter(s => s in (entry.stores || {}));
+      if (assignedStores.length === 0) {
+        msg.style.color = 'red';
+        msg.textContent = "SKU not assigned to any store";
+        return;
+      }
+
+      const counts = await Promise.all(assignedStores.map(store =>
+        db.ref('scans/' + store + '/' + sku).once('value').then(snap => snap.numChildren())
+      ));
+
+      let targetStore = null, target = 0;
+      for (let i = 0; i < assignedStores.length; i++) {
+        if (counts[i] < entry.stores[assignedStores[i]]) {
+          targetStore = assignedStores[i];
+          target = entry.stores[assignedStores[i]];
+          break;
+        }
+      }
+      let overflow = false;
+      if (!targetStore) {
+        targetStore = assignedStores[assignedStores.length - 1];
+        target = entry.stores[targetStore];
+        overflow = true;
+      }
+
+      // Check for an open HU for this checker + store.
+      const openSnap = await db.ref('openHU/' + checkerId + '/' + targetStore).once('value');
+      const openHuId = openSnap.val();
+
+      if (!openHuId) {
+        pendingSku = sku; pendingStore = targetStore; pendingQtyTarget = target;
+        document.getElementById('huInput').value = '';
+        document.getElementById('huModalBackdrop').style.display = 'flex';
+        document.getElementById('huInput').focus();
+        return;
+      }
+
+      await finishScan(sku, targetStore, openHuId, target, overflow);
+    }
+
+    async function submitHU() {
+      const huCode = document.getElementById('huInput').value.trim();
+      if (!huCode) return;
+      const pushRef = db.ref('handlingUnits').push();
+      await pushRef.set({
+        huCode: huCode, store: pendingStore, checkerId: checkerId,
+        status: 'open', createdAt: new Date().toISOString()
+      });
+      await db.ref('openHU/' + checkerId + '/' + pendingStore).set(pushRef.key);
+      document.getElementById('huModalBackdrop').style.display = 'none';
+      await finishScan(pendingSku, pendingStore, pushRef.key, pendingQtyTarget, false);
+    }
+
+    async function finishScan(sku, store, huId, target, overflow) {
+      const huSnap = await db.ref('handlingUnits/' + huId).once('value');
+      const huCode = (huSnap.val() || {}).huCode || "";
+
+      const scanRef = db.ref('scans/' + store + '/' + sku).push();
+      await scanRef.set({ checkerId: checkerId, huCode: huCode, huId: huId, timestamp: new Date().toISOString() });
+
+      const countSnap = await db.ref('scans/' + store + '/' + sku).once('value');
+      const filled = countSnap.numChildren();
+
+      const masterSnap = await db.ref('master/' + sku).once('value');
+      const name = (masterSnap.val() || {}).name || "";
+
+      await db.ref('recent/' + checkerId).push({ sku: sku, name: name, huCode: huCode, store: store, filled: filled, target: target, timestamp: new Date().toISOString() });
+
+      const msg = document.getElementById('msg');
+      msg.style.color = overflow ? '#b8860b' : 'green';
+      msg.textContent = (overflow ? "OVERFLOW - " : "") + sku + " -> HU " + huCode + " / " + store + " (" + filled + "/" + target + ")";
+
+      document.getElementById('skuInput').value = '';
+      document.getElementById('preview').textContent = "Scan a SKU to begin.";
+      document.getElementById('submitBtn').disabled = true;
+      document.getElementById('skuInput').focus();
+      loadRecent();
+    }
+
+    function loadRecent() {
+      db.ref('recent/' + checkerId).limitToLast(10).once('value').then(snap => {
+        const rows = [];
+        snap.forEach(child => {
+          const v = child.val();
+          rows.unshift("<tr><td>" + v.sku + "</td><td>" + v.name + "</td><td>" + v.huCode + "</td><td>" + v.store + " (" + v.filled + "/" + v.target + ")</td></tr>");
+        });
+        document.getElementById('recentRows').innerHTML = rows.join("");
+      });
+    }
+
+    let pendingCloseStore = null;
+    let pendingCloseHuId = null;
+
+    async function closeCurrentHU() {
+      const snap = await db.ref('openHU/' + checkerId).once('value');
+      const openMap = snap.val() || {};
+      const stores = Object.keys(openMap);
+      if (stores.length === 0) { alert("No open handling unit to close."); return; }
+
+      let storeToClose = stores[0];
+      if (stores.length > 1) {
+        const choice = prompt("Multiple open HUs: " + stores.join(", ") + "\nType the store to close:");
+        if (!choice || !openMap[choice]) return;
+        storeToClose = choice;
+      }
+
+      pendingCloseStore = storeToClose;
+      pendingCloseHuId = openMap[storeToClose];
+      document.getElementById('closeHuModalBackdrop').style.display = 'flex';
+    }
+
+    async function confirmCloseHU() {
+      await db.ref('handlingUnits/' + pendingCloseHuId).update({ status: 'closed', closedAt: new Date().toISOString() });
+      await db.ref('openHU/' + checkerId + '/' + pendingCloseStore).remove();
+      document.getElementById('closeHuModalBackdrop').style.display = 'none';
+      alert("Handling unit untuk " + pendingCloseStore + " telah ditutup. Print dapat dilakukan di admin view PC.");
+      pendingCloseStore = null;
+      pendingCloseHuId = null;
+    }
+
+    function cancelCloseHU() {
+      document.getElementById('closeHuModalBackdrop').style.display = 'none';
+      pendingCloseStore = null;
+      pendingCloseHuId = null;
+    }
+
+    function logout() {
+      db.ref('checkers/' + checkerId + '/locked').onDisconnect().cancel();
+      db.ref('checkers/' + checkerId + '/locked').set(false).then(() => {
+        window.location.href = "login.html";
+      });
+    }
+  </script>
+</body>
+</html>

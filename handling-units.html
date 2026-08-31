@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Handling Units</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    td, th { border: 1px solid #999; padding: 6px 10px; text-align: left; font-size: 14px; }
+    th { background: #2f5496; color: white; }
+    .status-open { color: #b8860b; }
+    .status-closed { color: green; font-weight: bold; }
+    button { padding: 6px 12px; cursor: pointer; }
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea { position: absolute; top: 0; left: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <h2>Handling Units</h2>
+  <p><a href="admin.html">Back to Dashboard</a></p>
+  <table>
+    <tr><th>HU Code</th><th>Checker</th><th>Store</th><th>Status</th><th>Action</th></tr>
+    <tbody id="rows"><tr><td colspan="5">Loading...</td></tr></tbody>
+  </table>
+
+  <div id="printArea" style="display:none;"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    let master = {};
+
+    async function load() {
+      const [huSnap, masterSnap] = await Promise.all([
+        db.ref('handlingUnits').once('value'),
+        db.ref('master').once('value')
+      ]);
+      master = masterSnap.val() || {};
+      const hus = huSnap.val() || {};
+      const rowsEl = document.getElementById('rows');
+      const entries = Object.entries(hus).sort((a, b) => (b[1].createdAt || "").localeCompare(a[1].createdAt || ""));
+
+      if (entries.length === 0) {
+        rowsEl.innerHTML = "<tr><td colspan='5'>No handling units yet.</td></tr>";
+        return;
+      }
+
+      rowsEl.innerHTML = entries.map(([id, hu]) => {
+        const statusClass = hu.status === 'closed' ? 'status-closed' : 'status-open';
+        const action = hu.status === 'closed'
+          ? "<button onclick=\"printLabel('" + id + "')\">Print Label</button>"
+          : "-";
+        return "<tr><td>" + hu.huCode + "</td><td>" + hu.checkerId + "</td><td>" + hu.store +
+               "</td><td class='" + statusClass + "'>" + hu.status + "</td><td>" + action + "</td></tr>";
+      }).join("");
+    }
+
+    async function printLabel(huId) {
+      const huSnap = await db.ref('handlingUnits/' + huId).once('value');
+      const hu = huSnap.val();
+      if (!hu) return;
+
+      // Gather all scans belonging to this HU (scans are stored under
+      // scans/{store}/{sku}/{pushId} with a huCode field on each entry).
+      const scansSnap = await db.ref('scans/' + hu.store).once('value');
+      const skuData = scansSnap.val() || {};
+      const skuCounts = {};
+      Object.entries(skuData).forEach(([sku, entries]) => {
+        Object.values(entries || {}).forEach(scan => {
+          if (scan.huCode === hu.huCode) {
+            skuCounts[sku] = (skuCounts[sku] || 0) + 1;
+          }
+        });
+      });
+
+      // Build the sorted label list: SKU A, SKU A, SKU B, SKU B, SKU C...
+      const labelLines = [];
+      Object.keys(skuCounts).sort().forEach(sku => {
+        for (let i = 0; i < skuCounts[sku]; i++) {
+          labelLines.push({ sku: sku, name: (master[sku] || {}).name || "" });
+        }
+      });
+
+      // NOTE: this is a plain placeholder print view for now - the real
+      // barcode/label layout (size, fields, Code 128) is still being
+      // designed separately and will replace this once finalized.
+      const printArea = document.getElementById('printArea');
+      printArea.innerHTML = "<h3>HU " + hu.huCode + " - " + hu.store + "</h3>" +
+        labelLines.map(l => "<div style='border:1px solid #000;padding:10px;margin:5px 0;'>" +
+          "<div><b>" + l.sku + "</b></div><div>" + l.name + "</div></div>").join("");
+      printArea.style.display = 'block';
+      window.print();
+      printArea.style.display = 'none';
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Checker login</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 420px; margin: auto; }
+    button { display: block; width: 100%; padding: 16px; margin: 8px 0; font-size: 20px;
+              border-radius: 8px; border: 1px solid #999; background: #eee; cursor: pointer; }
+    button:disabled { background: #ddd; color: #888; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h2>Select checker</h2>
+  <div id="checkerList">Loading...</div>
+  <p><a href="index.html">Back</a></p>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    const checkersRef = db.ref('checkers');
+    const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+
+    async function init() {
+      const snap = await checkersRef.once('value');
+      const data = snap.val();
+
+      if (!data) {
+        const seed = {};
+        for (let i = 1; i <= 10; i++) seed[i] = { locked: false, lastActiveAt: 0 };
+        await checkersRef.set(seed);
+      } else {
+        // Sweep for stale locks older than 3 hours and auto-release them.
+        const now = Date.now();
+        const updates = {};
+        Object.entries(data).forEach(([id, c]) => {
+          if (c.locked === true && (now - (c.lastActiveAt || 0)) > THREE_HOURS_MS) {
+            updates[id + '/locked'] = false;
+          }
+        });
+        if (Object.keys(updates).length > 0) {
+          await checkersRef.update(updates);
+        }
+      }
+    }
+
+    init().then(() => {
+      checkersRef.on('value', snap => {
+        const data = snap.val() || {};
+        const container = document.getElementById('checkerList');
+        container.innerHTML = "";
+        for (let i = 1; i <= 10; i++) {
+          const c = data[i] || { locked: false };
+          const locked = c.locked === true;
+          const btn = document.createElement('button');
+          btn.textContent = locked ? ("Checker " + i + " (in use)") : ("Checker " + i);
+          btn.disabled = locked;
+          btn.onclick = () => selectChecker(i);
+          container.appendChild(btn);
+        }
+      });
+    });
+
+    function selectChecker(id) {
+      const ref = db.ref('checkers/' + id + '/locked');
+      ref.transaction(current => {
+        if (current === true) return; // already locked, abort
+        return true;
+      }).then(result => {
+        if (result.committed) {
+          db.ref('checkers/' + id + '/lastActiveAt').set(Date.now());
+          window.location.href = "checking.html?checker=" + id;
+        } else {
+          alert("That checker was just taken by someone else - pick another.");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
