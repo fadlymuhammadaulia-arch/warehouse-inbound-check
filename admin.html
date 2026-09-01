@@ -119,13 +119,21 @@
     }
 
     async function downloadDetail() {
-      const scansSnap = await db.ref('scans').once('value');
+      const [scansSnap, huSnap] = await Promise.all([
+        db.ref('scans').once('value'),
+        db.ref('handlingUnits').once('value')
+      ]);
       const scansData = scansSnap.val() || {};
-      const rows = [["SKU", "Name", "Qty", "HandlingUnit", "Store", "CheckerId", "Timestamp"]];
+      const huData = huSnap.val() || {};
+      const huStatusById = {};
+      Object.entries(huData).forEach(([id, hu]) => { huStatusById[id] = hu.status; });
+
+      const rows = [["SKU", "Name", "Qty", "HandlingUnit", "HUStatus", "Store", "CheckerId", "Timestamp"]];
       Object.entries(scansData).forEach(([store, skus]) => {
         Object.entries(skus || {}).forEach(([sku, entries]) => {
           Object.values(entries || {}).forEach(scan => {
-            rows.push([sku, (master[sku] || {}).name || "", 1, scan.huCode || "", store, scan.checkerId, scan.timestamp]);
+            const status = huStatusById[scan.huId] || "";
+            rows.push([sku, (master[sku] || {}).name || "", 1, scan.huCode || "", status, store, scan.checkerId, scan.timestamp]);
           });
         });
       });

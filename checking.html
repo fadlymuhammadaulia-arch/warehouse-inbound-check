@@ -9,7 +9,7 @@
     input#skuInput { font-size: 22px; width: 100%; padding: 10px; box-sizing: border-box; }
     button.big { font-size: 20px; padding: 12px; width: 100%; margin-top: 8px; cursor: pointer; }
     #preview { font-size: 18px; min-height: 50px; margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 6px; }
-    #msg { font-size: 16px; min-height: 24px; }
+    #msg { font-size: 22px; font-weight: 500; min-height: 32px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
     td, th { border: 1px solid #999; padding: 4px 6px; text-align: left; }
     .modal-backdrop { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6);
@@ -69,6 +69,17 @@
     </div>
   </div>
 
+  <div id="storeNotifyBackdrop" onclick="document.getElementById('storeNotifyBackdrop').style.display='none'"
+       style="display:none; position: fixed; top:0; left:0; width:100%; height:100%; z-index: 999;
+              align-items: center; justify-content: center;">
+    <div id="storeNotifyCard" style="width: 85%; max-width: 380px; border-radius: 12px; padding: 30px 20px; text-align: center;">
+      <p style="font-size: 15px; margin: 0 0 6px; opacity: 0.9;">SORTIR KE</p>
+      <p id="storeNotifyName" style="font-size: 42px; font-weight: bold; margin: 0 0 18px; line-height: 1.1;">STORAGE A</p>
+      <p id="storeNotifyDetail" style="font-size: 15px; margin: 0; opacity: 0.9;">HU HU001 - 6/14</p>
+      <p style="font-size: 13px; margin: 16px 0 0; opacity: 0.7;">(tap di mana saja untuk lanjut)</p>
+    </div>
+  </div>
+
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
@@ -79,6 +90,20 @@
     let pendingSku = null;
     let pendingStore = null;
     let pendingQtyTarget = null;
+    let lastStore = null;
+
+    // Fixed palette of 10 colors, assigned by each store's position in the
+    // priority order (1st priority store = color 1, etc). If there are ever
+    // more than 10 stores, it cycles back to the start of the palette.
+    const STORE_COLORS = [
+      '#e67e22', '#2980b9', '#27ae60', '#8e44ad', '#c0392b',
+      '#16a085', '#d35400', '#2c3e50', '#f39c12', '#7f8c8d'
+    ];
+    function colorForStore(store) {
+      const idx = storeOrder.indexOf(store);
+      if (idx === -1) return '#555';
+      return STORE_COLORS[idx % STORE_COLORS.length];
+    }
 
     if (!checkerId) {
       document.body.innerHTML = "<p>No checker selected. <a href='login.html'>Go to login</a></p>";
@@ -232,6 +257,17 @@
       const msg = document.getElementById('msg');
       msg.style.color = overflow ? '#b8860b' : 'green';
       msg.textContent = (overflow ? "OVERFLOW - " : "") + sku + " -> HU " + huCode + " / " + store + " (" + filled + "/" + target + ")";
+
+      if (store !== lastStore) {
+        const color = colorForStore(store);
+        const card = document.getElementById('storeNotifyCard');
+        card.style.background = color;
+        card.style.color = '#fff';
+        document.getElementById('storeNotifyName').textContent = store.toUpperCase();
+        document.getElementById('storeNotifyDetail').textContent = "HU " + huCode + " - " + filled + "/" + target;
+        document.getElementById('storeNotifyBackdrop').style.display = 'flex';
+      }
+      lastStore = store;
 
       document.getElementById('skuInput').value = '';
       document.getElementById('preview').textContent = "Scan SKU untuk memulai.";

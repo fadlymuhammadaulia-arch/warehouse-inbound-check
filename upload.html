@@ -32,6 +32,20 @@
   <p id="msg"></p>
 
   <hr/>
+  <h3>Restore hasil checking (opsional)</h3>
+  <p id="restoreGateMsg">Memeriksa status data master...</p>
+  <div id="restoreSection" style="display:none;">
+    <p>Upload file Detail (hasil download sebelumnya) untuk mengembalikan
+    scan beserta Handling Unit dan status open/closed-nya. Sistem hanya
+    akan menambah data jika jumlah saat ini lebih kecil dari file yang
+    diupload - data yang sudah ada tidak akan berkurang atau tertimpa.</p>
+    <input type="file" id="restoreFileInput" accept=".csv,.xlsx"/>
+    <br/>
+    <button onclick="restoreFromDetail()">Restore dari Detail</button>
+    <p id="restoreMsg"></p>
+  </div>
+
+  <hr/>
   <h3>Reset dokumen tertaut</h3>
   <p>Tindakan ini akan menghapus data master yang telah diupload beserta
   seluruh hasil scan dan handling unit, sehingga anda dapat memulai
@@ -94,6 +108,175 @@
       }
     }
 
+    function csvEscape(v) {
+      return '"' + String(v).replace(/"/g, '""') + '"';
+    }
+    function triggerFileDownload(filename, csv) {
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function autoBackupBeforeReset() {
+      const [masterSnap, orderSnap, scansSnap, huSnap] = await Promise.all([
+        db.ref('master').once('value'),
+        db.ref('storeOrder').once('value'),
+        db.ref('scans').once('value'),
+        db.ref('handlingUnits').once('value')
+      ]);
+      const master = masterSnap.val() || {};
+      const storeOrder = orderSnap.val() || [];
+      const scansData = scansSnap.val() || {};
+      const huData = huSnap.val() || {};
+      const huStatusById = {};
+      Object.entries(huData).forEach(([id, hu]) => { huStatusById[id] = hu.status; });
+      if (Object.keys(master).length === 0) return; // nothing to back up yet
+
+      const scanCounts = {};
+      Object.entries(scansData).forEach(([store, skus]) => {
+        Object.entries(skus || {}).forEach(([sku, entries]) => {
+          scanCounts[sku + '|' + store] = Object.keys(entries || {}).length;
+        });
+      });
+
+      const summaryRows = [["SKU", "Name", ...storeOrder]];
+      Object.keys(master).sort().forEach(sku => {
+        const entry = master[sku];
+        const line = [sku, entry.name || ""];
+        storeOrder.forEach(store => line.push(scanCounts[sku + '|' + store] || 0));
+        summaryRows.push(line);
+      });
+      const summaryCsv = summaryRows.map(r => r.map(csvEscape).join(",")).join("\n");
+
+      const detailRows = [["SKU", "Name", "Qty", "HandlingUnit", "HUStatus", "Store", "CheckerId", "Timestamp"]];
+      Object.entries(scansData).forEach(([store, skus]) => {
+        Object.entries(skus || {}).forEach(([sku, entries]) => {
+          Object.values(entries || {}).forEach(scan => {
+            const status = huStatusById[scan.huId] || "";
+            detailRows.push([sku, (master[sku] || {}).name || "", 1, scan.huCode || "", status, store, scan.checkerId, scan.timestamp]);
+          });
+        });
+      });
+      const detailCsv = detailRows.map(r => r.map(csvEscape).join(",")).join("\n");
+
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      triggerFileDownload("backup-summary-" + dateStamp + ".csv", summaryCsv);
+      triggerFileDownload("backup-detail-" + dateStamp + ".csv", detailCsv);
+    }
+
+    async function checkRestoreGate() {
+      const masterSnap = await db.ref('master').once('value');
+      const hasMaster = masterSnap.exists() && Object.keys(masterSnap.val() || {}).length > 0;
+      if (hasMaster) {
+        document.getElementById('restoreGateMsg').style.display = 'none';
+        document.getElementById('restoreSection').style.display = 'block';
+      } else {
+        document.getElementById('restoreGateMsg').textContent = "Upload data master utama terlebih dahulu sebelum dapat melakukan restore.";
+        document.getElementById('restoreSection').style.display = 'none';
+      }
+    }
+    checkRestoreGate();
+
+    async function restoreFromDetail() {
+      const file = document.getElementById('restoreFileInput').files[0];
+      const msg = document.getElementById('restoreMsg');
+      if (!file) return;
+      msg.textContent = "Memproses restore...";
+
+      const rows = await readFileAsRows(file);
+      if (rows.length < 2) { msg.textContent = "File terlihat kosong."; return; }
+
+      // Expected columns (matches our own Detail export):
+      // SKU, Name, Qty, HandlingUnit, HUStatus, Store, CheckerId, Timestamp
+      const entries = [];
+      for (let i = 1; i < rows.length; i++) {
+        const cols = rows[i];
+        const sku = String(cols[0] || "").trim();
+        const huCode = String(cols[3] || "").trim();
+        const huStatus = String(cols[4] || "").trim();
+        const store = String(cols[5] || "").trim();
+        const checkerId = String(cols[6] || "").trim();
+        const timestamp = String(cols[7] || "").trim();
+        if (!sku || !store) continue;
+        entries.push({ sku, huCode, huStatus, store, checkerId, timestamp });
+      }
+
+      // Step 1: reconstruct Handling Units from the unique (huCode, store,
+      // checkerId) combinations found in the file, using the actual
+      // recorded status rather than guessing.
+      const huGroups = {}; // key: huCode|store|checkerId -> {timestamps: [], status}
+      entries.forEach(e => {
+        if (!e.huCode) return;
+        const key = e.huCode + '|' + e.store + '|' + e.checkerId;
+        if (!huGroups[key]) huGroups[key] = { huCode: e.huCode, store: e.store, checkerId: e.checkerId, timestamps: [], status: e.huStatus };
+        huGroups[key].timestamps.push(e.timestamp);
+      });
+
+      const huIdLookup = {}; // key: huCode|store|checkerId -> huId
+      let reconstructedHuCount = 0;
+
+      for (const [key, h] of Object.entries(huGroups)) {
+        h.firstSeen = h.timestamps.slice().sort()[0];
+        h.lastSeen = h.timestamps.slice().sort().slice(-1)[0];
+
+        // Skip if this HU code already exists (e.g. restore run twice).
+        const existingSnap = await db.ref('handlingUnits').orderByChild('huCode').equalTo(h.huCode).once('value');
+        const existingVal = existingSnap.val();
+        if (existingVal) {
+          const existingId = Object.keys(existingVal)[0];
+          huIdLookup[key] = existingId;
+          continue;
+        }
+
+        const status = (h.status === 'open' || h.status === 'closed') ? h.status : 'open';
+        const pushRef = db.ref('handlingUnits').push();
+        await pushRef.set({
+          huCode: h.huCode, store: h.store, checkerId: h.checkerId,
+          status: status,
+          createdAt: h.firstSeen,
+          closedAt: status === 'closed' ? h.lastSeen : null
+        });
+        huIdLookup[key] = pushRef.key;
+        reconstructedHuCount++;
+        if (status === 'open') {
+          await db.ref('openHU/' + h.checkerId + '/' + h.store).set({ huId: pushRef.key, huCode: h.huCode });
+        }
+      }
+
+      // Step 2: top up scan counts per SKU+Store, same safe/additive rule
+      // as before - only add the shortfall, never remove or overwrite.
+      const bySkuStore = {};
+      entries.forEach(e => {
+        const key = e.sku + '|' + e.store;
+        if (!bySkuStore[key]) bySkuStore[key] = [];
+        bySkuStore[key].push(e);
+      });
+
+      let addedCount = 0;
+      for (const [key, group] of Object.entries(bySkuStore)) {
+        const [sku, store] = key.split('|');
+        const countSnap = await db.ref('scans/' + store + '/' + sku).once('value');
+        const currentCount = countSnap.numChildren();
+        const toAdd = group.length - currentCount;
+        if (toAdd <= 0) continue;
+
+        const toRestore = group.slice(group.length - toAdd);
+        for (const e of toRestore) {
+          const huKey = e.huCode + '|' + e.store + '|' + e.checkerId;
+          const huId = huIdLookup[huKey] || '';
+          const ref = db.ref('scans/' + store + '/' + sku).push();
+          await ref.set({ checkerId: e.checkerId, huCode: e.huCode, huId: huId, timestamp: e.timestamp, restored: true });
+          addedCount++;
+        }
+      }
+
+      msg.textContent = "Restore selesai - " + addedCount + " catatan scan dan " + reconstructedHuCount + " handling unit ditambahkan.";
+    }
+
     let pendingFile = null;
 
     async function upload() {
@@ -123,6 +306,8 @@
 
     async function confirmDifferentFileUpload() {
       document.getElementById('diffFileModalBackdrop').style.display = 'none';
+      document.getElementById('msg').textContent = "Menyimpan backup sebelum reset...";
+      await autoBackupBeforeReset();
       await db.ref().update({
         scans: null,
         handlingUnits: null,
@@ -228,6 +413,8 @@
     });
 
     async function doReset() {
+      document.getElementById('msg').textContent = "Menyimpan backup sebelum reset...";
+      await autoBackupBeforeReset();
       await db.ref().update({
         master: null,
         storeOrder: null,
