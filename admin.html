@@ -86,7 +86,7 @@
           const cls = filled >= target ? 'full' : '';
           return "<td class='" + cls + "'>" + filled + "/" + target + "</td>";
         }).join("");
-        return "<tr><td>" + sku + "</td><td>" + (entry.name || "") + "</td><td>" + (entry.price || "") + "</td><td>" + (entry.brand || "") + "</td>" + cells + "</tr>";
+        return "<tr><td>" + sku + "</td><td>" + (entry.name || "") + "</td><td>" + (entry.price ? "Rp " + entry.price : "") + "</td><td>" + (entry.brand || "") + "</td>" + cells + "</tr>";
       }).join("");
     }
 

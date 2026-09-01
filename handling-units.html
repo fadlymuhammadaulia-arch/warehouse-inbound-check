@@ -16,16 +16,16 @@
       @page { size: 7cm 3cm; margin: 0; }
       body * { visibility: hidden; }
       #printArea, #printArea * { visibility: visible; }
-      #printArea { position: absolute; top: 0; left: 0; width: 100%; }
+      #printArea { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; }
       .print-label {
         width: 7cm; height: 3cm; box-sizing: border-box; padding: 2mm;
         page-break-after: always; display: flex; flex-direction: column;
         align-items: center; justify-content: center; overflow: hidden;
       }
       .print-label img { max-width: 100%; max-height: 100%; object-fit: contain; }
-      .lbl-price { font-size: 10pt; font-weight: bold; font-family: 'Times New Roman', serif; margin-bottom: 1mm; }
+      .lbl-price { font-size: 11pt; font-weight: bold; font-family: 'Times New Roman', serif; margin-bottom: 1mm; }
       .lbl-barcode { width: 95%; height: 1.5cm; margin: 1mm 0; }
-      .lbl-sku, .lbl-name { font-size: 7pt; font-weight: bold; font-family: Calibri, sans-serif; text-align: center; line-height: 1.2; }
+      .lbl-sku, .lbl-name { font-size: 7.5pt; font-weight: bold; font-family: Calibri, sans-serif; text-align: center; line-height: 1.2; }
       .lbl-missing { font-size: 8pt; text-align: center; color: #900; }
     }
   </style>
@@ -115,7 +115,7 @@
             : "<div class='lbl-missing'>Gambar Kemendagri belum diupload untuk brand: " + (u.brand || "(kosong)") + "</div>") +
           "</div>";
         html += "<div class='print-label'>" +
-          "<div class='lbl-price'>" + u.price + "</div>" +
+          "<div class='lbl-price'>" + (u.price ? "Rp " + u.price : "") + "</div>" +
           "<svg id='barcode-" + idx + "' class='lbl-barcode'></svg>" +
           "<div class='lbl-sku'>" + u.sku + "</div>" +
           "<div class='lbl-name'>" + u.name + "</div>" +
