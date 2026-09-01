@@ -97,6 +97,37 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script>
+    function parseCsvLine(line) {
+      // Properly handles quoted fields, including commas and escaped
+      // double-quotes ("") inside quotes - a plain split(",") breaks on
+      // values like "89,000" that use a thousands separator.
+      const result = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (inQuotes) {
+          if (char === '"') {
+            if (line[i + 1] === '"') { current += '"'; i++; }
+            else { inQuotes = false; }
+          } else {
+            current += char;
+          }
+        } else {
+          if (char === '"') {
+            inQuotes = true;
+          } else if (char === ",") {
+            result.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+      }
+      result.push(current);
+      return result;
+    }
+
     async function readFileAsRows(file) {
       if (file.name.toLowerCase().endsWith('.xlsx')) {
         const buffer = await file.arrayBuffer();
@@ -106,7 +137,7 @@
         return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
       } else {
         const text = await file.text();
-        return text.split(/\r?\n/).filter(l => l.trim() !== "").map(line => line.split(","));
+        return text.split(/\r?\n/).filter(l => l.trim() !== "").map(line => parseCsvLine(line));
       }
     }
 
