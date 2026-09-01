@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Kemendagri Labels per Brand</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 700px; margin: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    td, th { border: 1px solid #999; padding: 8px 10px; text-align: left; vertical-align: middle; }
+    th { background: #2f5496; color: white; }
+    img.preview { max-width: 120px; max-height: 60px; display: block; }
+    .no-img { color: #999; font-style: italic; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h2>Kemendagri Labels per Brand</h2>
+  <p><a href="admin.html">Back to Dashboard</a></p>
+  <p>Upload satu gambar label Kemendagri untuk tiap Brand yang ada di data
+  master. Gambar ini akan dipasangkan otomatis dengan label harga saat
+  print label di halaman Handling Units. Gunakan gambar berukuran kecil
+  (disarankan di bawah 300KB) agar tidak membebani database.</p>
+
+  <table>
+    <tr><th>Brand</th><th>Gambar saat ini</th><th>Upload / Ganti</th></tr>
+    <tbody id="rows"><tr><td colspan="3">Memuat...</td></tr></tbody>
+  </table>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    let brandLabels = {};
+
+    async function load() {
+      const [masterSnap, labelsSnap] = await Promise.all([
+        db.ref('master').once('value'),
+        db.ref('brandLabels').once('value')
+      ]);
+      const master = masterSnap.val() || {};
+      brandLabels = labelsSnap.val() || {};
+
+      const brands = [...new Set(Object.values(master).map(e => (e.brand || "").trim()).filter(b => b !== ""))].sort();
+      const rowsEl = document.getElementById('rows');
+
+      if (brands.length === 0) {
+        rowsEl.innerHTML = "<tr><td colspan='3'>Belum ada Brand di data master.</td></tr>";
+        return;
+      }
+
+      rowsEl.innerHTML = brands.map(brand => {
+        const imgId = 'img-' + brand.replace(/[^a-zA-Z0-9]/g, '_');
+        const preview = brandLabels[brand]
+          ? "<img id='" + imgId + "' class='preview' src='" + brandLabels[brand] + "'/>"
+          : "<span id='" + imgId + "' class='no-img'>Belum ada gambar</span>";
+        const inputId = 'file-' + brand.replace(/[^a-zA-Z0-9]/g, '_');
+        return "<tr><td>" + brand + "</td><td>" + preview + "</td><td>" +
+          "<input type='file' id='" + inputId + "' accept='image/*'/>" +
+          "<br/><button onclick=\"uploadBrandImage('" + brand.replace(/'/g, "\\'") + "', '" + inputId + "', '" + imgId + "')\">Upload</button>" +
+          "</td></tr>";
+      }).join("");
+    }
+
+    function uploadBrandImage(brand, inputId, imgId) {
+      const file = document.getElementById(inputId).files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUri = e.target.result;
+        await db.ref('brandLabels/' + brand).set(dataUri);
+        const el = document.getElementById(imgId);
+        const img = document.createElement('img');
+        img.className = 'preview';
+        img.id = imgId;
+        img.src = dataUri;
+        el.replaceWith(img);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    load();
+  </script>
+</body>
+</html>

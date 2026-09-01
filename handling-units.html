@@ -13,9 +13,20 @@
     .status-closed { color: green; font-weight: bold; }
     button { padding: 6px 12px; cursor: pointer; }
     @media print {
+      @page { size: 7cm 3cm; margin: 0; }
       body * { visibility: hidden; }
       #printArea, #printArea * { visibility: visible; }
       #printArea { position: absolute; top: 0; left: 0; width: 100%; }
+      .print-label {
+        width: 7cm; height: 3cm; box-sizing: border-box; padding: 2mm;
+        page-break-after: always; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; overflow: hidden;
+      }
+      .print-label img { max-width: 100%; max-height: 100%; object-fit: contain; }
+      .lbl-price { font-size: 9pt; font-family: 'Times New Roman', serif; }
+      .lbl-barcode { width: 90%; height: auto; }
+      .lbl-sku, .lbl-name { font-size: 6.5pt; font-family: Calibri, sans-serif; text-align: center; }
+      .lbl-missing { font-size: 8pt; text-align: center; color: #900; }
     }
   </style>
 </head>
@@ -29,6 +40,7 @@
 
   <div id="printArea" style="display:none;"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
@@ -79,22 +91,49 @@
         });
       });
 
-      // Build the sorted label list: SKU A, SKU A, SKU B, SKU B, SKU C...
-      const labelLines = [];
+      const brandLabelsSnap = await db.ref('brandLabels').once('value');
+      const brandLabels = brandLabelsSnap.val() || {};
+
+      // Expand into one entry per physical unit, sorted/grouped by SKU
+      // (e.g. SKU A, SKU A, SKU B, SKU B, SKU C...).
+      const units = [];
       Object.keys(skuCounts).sort().forEach(sku => {
+        const entry = master[sku] || {};
         for (let i = 0; i < skuCounts[sku]; i++) {
-          labelLines.push({ sku: sku, name: (master[sku] || {}).name || "" });
+          units.push({ sku, name: entry.name || "", price: entry.price || "", brand: entry.brand || "" });
         }
       });
 
-      // NOTE: this is a plain placeholder print view for now - the real
-      // barcode/label layout (size, fields, Code 128) is still being
-      // designed separately and will replace this once finalized.
+      // For each unit: Kemendagri label first, then the price/barcode
+      // label - both sized 7cm x 3cm via the print CSS.
+      let html = "";
+      units.forEach((u, idx) => {
+        const brandImg = brandLabels[u.brand];
+        html += "<div class='print-label'>" +
+          (brandImg
+            ? "<img src='" + brandImg + "'/>"
+            : "<div class='lbl-missing'>Gambar Kemendagri belum diupload untuk brand: " + (u.brand || "(kosong)") + "</div>") +
+          "</div>";
+        html += "<div class='print-label'>" +
+          "<div class='lbl-price'>" + u.price + "</div>" +
+          "<svg id='barcode-" + idx + "' class='lbl-barcode'></svg>" +
+          "<div class='lbl-sku'>" + u.sku + "</div>" +
+          "<div class='lbl-name'>" + u.name + "</div>" +
+          "</div>";
+      });
+
       const printArea = document.getElementById('printArea');
-      printArea.innerHTML = "<h3>HU " + hu.huCode + " - " + hu.store + "</h3>" +
-        labelLines.map(l => "<div style='border:1px solid #000;padding:10px;margin:5px 0;'>" +
-          "<div><b>" + l.sku + "</b></div><div>" + l.name + "</div></div>").join("");
+      printArea.innerHTML = html;
       printArea.style.display = 'block';
+
+      units.forEach((u, idx) => {
+        try {
+          JsBarcode("#barcode-" + idx, u.sku, { format: "CODE128", displayValue: false, height: 30, margin: 0 });
+        } catch (e) {
+          console.error("Gagal membuat barcode untuk", u.sku, e);
+        }
+      });
+
       window.print();
       printArea.style.display = 'none';
     }

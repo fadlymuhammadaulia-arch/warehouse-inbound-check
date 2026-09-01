@@ -22,9 +22,11 @@
 
   <p>Upload satu file CSV atau Excel (.xlsx). Hanya sheet pertama yang
   akan dibaca. Format: kolom pertama SKU, kolom kedua Nama item, kolom
-  berikutnya adalah nama store dengan qty target sebagai nilai sel
-  (kosongkan jika SKU tersebut tidak dikirim ke store tersebut). Satu
-  SKU dapat memiliki qty di lebih dari satu store.</p>
+  ketiga Price, kolom keempat Brand, kolom berikutnya adalah nama store
+  dengan qty target sebagai nilai sel (kosongkan jika SKU tersebut tidak
+  dikirim ke store tersebut). Satu SKU dapat memiliki qty di lebih dari
+  satu store. Price dan Brand hanya digunakan untuk dashboard dan
+  labelling, tidak memengaruhi perhitungan qty.</p>
 
   <input type="file" id="fileInput" accept=".csv,.xlsx"/>
   <br/>
@@ -337,8 +339,9 @@
       if (rows.length < 2) { msg.textContent = "File terlihat kosong."; return; }
 
       const header = rows[0];
-      // Column 0 = SKU, column 1 = Name, columns 2+ = store names.
-      const storeNames = header.slice(2).map(s => String(s).trim()).filter(s => s !== "");
+      // Column 0 = SKU, column 1 = Name, column 2 = Price, column 3 = Brand,
+      // columns 4+ = store names.
+      const storeNames = header.slice(4).map(s => String(s).trim()).filter(s => s !== "");
 
       const masterData = {};
       for (let i = 1; i < rows.length; i++) {
@@ -346,14 +349,16 @@
         const sku = String(cols[0] || "").trim();
         if (!sku) continue;
         const name = String(cols[1] || "").trim();
+        const price = String(cols[2] || "").trim();
+        const brand = String(cols[3] || "").trim();
         const stores = {};
         for (let j = 0; j < storeNames.length; j++) {
-          const cell = cols[j + 2];
+          const cell = cols[j + 4];
           if (cell === "" || cell === undefined || cell === null) continue;
           const qty = parseInt(cell, 10);
           if (!isNaN(qty) && qty > 0) stores[storeNames[j]] = qty;
         }
-        masterData[sku] = { name: name, stores: stores };
+        masterData[sku] = { name: name, price: price, brand: brand, stores: stores };
       }
 
       pendingMasterData = masterData;
